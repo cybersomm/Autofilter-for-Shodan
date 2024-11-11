@@ -1,0 +1,193 @@
+import shodan
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime
+
+def get_user_inputs():
+    print("\n=== SEARCH PARAMETERS ===")
+    # Get city
+    city = input("\nEnter city name (e.g., Chicago, Los Angeles, New York): ")
+    while not city:
+        city = input("City is required. Please enter a city name: ")
+
+    # Get device type
+    print("\nCommon device types to search for:")
+    print("1. webcam")
+    print("2. printer")
+    print("3. router")
+    print("4. camera")
+    print("5. industrial")
+    print("6. scada")
+    print("7. hvac")
+    device_type = input("\nEnter device type from above or specify your own (required): ")
+    while not device_type:
+        device_type = input("Device type is required. Please enter a device type: ")
+
+    # Get port
+    port = input("\nEnter specific port to search (e.g., 80, 443) or press Enter for all: ")
+
+    # Get max results
+    max_results = input("\nEnter maximum number of results to return (default is 100): ") or "100"
+
+    # Get vulnerability threshold
+    vuln_threshold = input("\nEnter minimum vulnerability score to flag (1-10, default is 7): ") or "7"
+
+    # Get organization limit
+    org_limit = input("\nEnter number of top organizations to analyze (default is 10): ") or "10"
+
+    # Get sorting preference
+    print("\nSort results by:")
+    print("1. Number of vulnerabilities")
+    print("2. Organization name")
+    print("3. Port number")
+    print("4. Date found")
+    sort_option = input("Choose sorting option (1-4, default is 1): ") or "1"
+
+    # Get export preference
+    print("\nExport format options:")
+    print("1. CSV")
+    print("2. Excel")
+    print("3. HTML")
+    print("4. JSON")
+    export_format = input("Choose export format (1-4, default is 1): ") or "1"
+
+    # Get visualization preference
+    print("\nVisualization options:")
+    print("1. Bar charts")
+    print("2. Pie charts")
+    print("3. Line graphs")
+    print("4. Heat maps")
+    print("5. All of the above")
+    viz_option = input("Choose visualization type (1-5, default is 1): ") or "1"
+
+    return {
+        'city': city,
+        'device_type': device_type,
+        'port': port,
+        'max_results': int(max_results),
+        'vuln_threshold': int(vuln_threshold),
+        'org_limit': int(org_limit),
+        'sort_option': sort_option,
+        'export_format': export_format,
+        'viz_option': viz_option
+    }
+
+def main():
+    print("Starting program...")
+
+    SHODAN_API_KEY = 'hSNUI2Rumojhm1C0g7mZkQe4A0GiWJfJ'
+    api = shodan.Shodan(SHODAN_API_KEY)
+
+    while True:
+        # Get all user inputs
+        params = get_user_inputs()
+
+        try:
+            print("\nInitiating search...")
+            # Build query based on user input
+            query = f'city:"{params["city"]}" "{params["device_type"]}"'
+            if params['port']:
+                query += f' port:{params["port"]}'
+
+            print(f"Using query: {query}")
+
+            # Perform the search
+            results = api.search(query, limit=params['max_results'])
+            print(f"\nFound {len(results['matches'])} results")
+
+            # Store the results
+            devices = []
+
+            # Process each result
+            print("\nProcessing results...")
+            for result in results['matches']:
+                device = {
+                    'ip': result['ip_str'],
+                    'port': result.get('port', 'N/A'),
+                    'org': result.get('org', 'Unknown'),
+                    'product': result.get('product', 'Unknown'),
+                    'vulns': len(result.get('vulns', [])),
+                    'timestamp': result.get('timestamp', 'Unknown')
+                }
+                devices.append(device)
+                print(f"\nFound device at {device['ip']} ({device['org']})")
+
+            # Create DataFrame
+            df = pd.DataFrame(devices)
+
+            # Sort based on user preference
+            if params['sort_option'] == '1':
+                df = df.sort_values('vulns', ascending=False)
+            elif params['sort_option'] == '2':
+                df = df.sort_values('org')
+            elif params['sort_option'] == '3':
+                df = df.sort_values('port')
+            elif params['sort_option'] == '4':
+                df = df.sort_values('timestamp')
+
+            # Display results based on visualization preference
+            if params['viz_option'] in ['1', '5']:  # Bar charts
+                plt.figure(figsize=(12, 6))
+                df['org'].value_counts().head(params['org_limit']).plot(kind='bar')
+                plt.title(f'Top Organizations with {params["device_type"]} in {params["city"]}')
+                plt.xlabel('Organization')
+                plt.ylabel('Number of Devices')
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                plt.show()
+
+            if params['viz_option'] in ['2', '5']:  # Pie chart
+                plt.figure(figsize=(10, 10))
+                df['org'].value_counts().head(params['org_limit']).plot(kind='pie')
+                plt.title(f'Organization Distribution in {params["city"]}')
+                plt.axis('equal')
+                plt.show()
+
+            if params['viz_option'] in ['3', '5']:  # Line graph
+                plt.figure(figsize=(12, 6))
+                df['vulns'].plot(kind='line')
+                plt.title('Vulnerability Trends')
+                plt.xlabel('Device Index')
+                plt.ylabel('Number of Vulnerabilities')
+                plt.show()
+
+            if params['viz_option'] in ['4', '5']:  # Heat map
+                plt.figure(figsize=(12, 8))
+                pivot_table = pd.crosstab(df['org'], df['port'])
+                sns.heatmap(pivot_table, annot=True, cmap='YlOrRd')
+                plt.title('Organization vs Port Heatmap')
+                plt.tight_layout()
+                plt.show()
+
+            # Export based on user preference
+            if params['export_format'] == '1':  # CSV
+                filename = f"{params['city']}_{params['device_type']}_results.csv"
+                df.to_csv(filename, index=False)
+            elif params['export_format'] == '2':  # Excel
+                filename = f"{params['city']}_{params['device_type']}_results.xlsx"
+                df.to_excel(filename, index=False)
+            elif params['export_format'] == '3':  # HTML
+                filename = f"{params['city']}_{params['device_type']}_results.html"
+                df.to_html(filename)
+            elif params['export_format'] == '4':  # JSON
+                filename = f"{params['city']}_{params['device_type']}_results.json"
+                df.to_json(filename)
+            print(f"\nResults exported to {filename}")
+
+            # Ask about another search
+            another = input("\nWould you like to perform another search? (yes/no): ").lower()
+            if another != 'yes':
+                break
+
+        except shodan.APIError as e:
+            print(f'Shodan API Error: {e}')
+        except Exception as e:
+            print(f'Unexpected error: {e}')
+            import traceback
+            traceback.print_exc()
+
+    print("\nProgram completed.")
+
+if __name__ == "__main__":
+    main()
